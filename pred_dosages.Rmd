@@ -1,0 +1,101 @@
+## Introduction
+
+In order to properly analyze the data in following steps, the original VCF files need to be split by drug, converted to dosage files, and then converted to plink files.
+
+## Split VCF by Drug
+
+First, the original VCF file needs to be split by drug: Clopidogrel, Apixaban, Warfarin, Rivaroxiban, and NOAC (Apixaban & Rivaroxiban).
+
+```{}
+for chr in {1..22};
+do vcftools --gzvcf /home/ashley/account/vcfs/blacks_imputed/all/chr${chr}_maf01_r28.vcf.gz --keep /home/ashley/account/vcfs/blacks_imputed/clop/clop_ids_new_filt.txt --recode --recode-INFO-all --out clop_chr${chr};
+done
+```
+
+This is repeated for the rest of the drugs.
+
+The files are then gzipped before the next step using the `gzip` command. 
+
+## VCF to Dosage Python Script
+
+A Python script was then written in order to output the dosage files: 
+
+```{}
+import gzip
+import re
+import sys
+import argparse
+import os
+
+def check_arg(args=None):
+    parser = argparse.ArgumentParser(description='Script to filter imputed VCF')
+    parser.add_argument('-i', '--inputdir',
+                        help='directory containing VCF file',
+                        required='True'
+                        )
+    parser.add_argument('-c', '--chr',
+                        help='chromosome',
+			type=str,
+                        required='True'
+                        )
+     parser.add_argument('-d', '--drug',
+                        help='drug',
+			type=str,
+                        required='True'
+                        )
+    return parser.parse_args(args)
+
+#retrieve command line arguments
+args = check_arg(sys.argv[1:])
+chrpath = args.inputdir
+c = args.chr
+drug = args.drug
+chrfile = chrpath + drug + "_" + "chr" + c + ".recode.vcf.gz"
+mypath = "/home/rhea/account_wflow/"
+
+# get dosage file data - getting errors with this section
+if(os.path.exists(mypath+ 'UMich_dosages/') == False): 
+    os.mkdir(mypath + 'UMich_dosages/')
+
+outdosage = open(mypath + "UMich_dosages/" + drug + "chr" + c + ".dosage.txt","w")
+
+for line in gzip.open(chrfile):
+    #skip meta data and header lines
+    if(line.startswith(b'##')):
+        continue
+    if(line.startswith(b'#CHROM')):
+        continue
+    arr = line.strip().split()
+    (chr, pos, id, ref, alt, qual, filter, info, format) = arr[0:9]
+    gt_dosagerow = arr[9:]
+    #get freq of alt allele:
+    info_list = info.split(b";")
+    af_list = info_list[0].split(b"=")
+    freqalt = af_list[1]
+    #get dosage of alt allele
+    dosagerow = map(lambda x : float(x.split(b":")[1]), gt_dosagerow) #lambda function to split each info entry and collect the dosage
+    dosages = ' '.join(map(str,dosagerow))
+    #reformat ids for proteome models (chr:pos)
+    id_list = id.split(b":")
+    id_formatted = str(id_list[0]) + ":" + str(id_list[1])
+    output = str(chr) + ' ' + str(id_formatted) + ' ' + str(pos) + ' ' + str(ref) + ' ' + str(alt) + ' ' + str(freqalt) + ' ' + dosages + '\n'
+    output = output.replace("b", "")
+    output = output.replace("'", "")
+    outdosage.write(output)
+
+outdosage.close()
+```
+
+This applies the python script to the gzipped VCF files. It then outputs the dosage txt files. 
+
+```{}
+for chr in {1..22};
+do python /home/rhea/account_wflow/vcfs/vcf_to_dosage.py -i /home/rhea/account_wflow/vcfs/clop/ -c ${chr} -d clop;
+done
+```
+
+This is repeated for each drug. 
+
+The text files are then gzipped using the `gzip` command. 
+
+Dosage files are saved under `/home/rhea/account_wflow/dosages/blacks/drug*/pred_dosages`.
