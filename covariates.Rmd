@@ -1,0 +1,161 @@
+
+## Introduction
+
+This set of code shows the analysis of covariates and PCs. 
+
+This will be done using creatinine clearance as an example.
+
+### Create bed/bim/fam files for combined clop/noac drugs based on the list of IDs
+```{}
+plink --bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/ACCOuNTBLACKSfinal_updated --keep /home/rhea/account_wflow/vcfs/blacks_imputed/clop_noac/clop_noac_ids_filt.txt --make-bed --out pre_imputed_blacks_clop_noac
+```
+
+### Generate kinship matrices
+```{}
+plink --bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/pre_imputed_blacks_clop_noac --cluster --matrix --out blacks_clop_noac
+
+gemma -bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/pre_imputed_blacks_clop_noac -gk 2 -o blacks_clop_noac
+
+gemma -bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/missingness_hwe_steps/05filtered_HWE -gk 2 -o blacks_clop_noac
+
+```
+
+### QC data
+```{}
+/home/ryan/gwasqc_pipeline/shellscripts/01MissingnessFiltering -b /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/pre_imputed_blacks_clop_noac --maf 0.01 -a -o /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/
+```
+
+### Run King:
+```{}
+/home/ashley/king --pca -b /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/missingness_hwe_steps/05filtered_HWE.bed --prefix blacks_clop_noac_
+```
+
+### Create input for PCA plots
+```{}
+plink --bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/missingness_hwe_steps/05filtered_HWE --bmerge /home/ashley/account/covariates/hapmap_pops_plinkfiles_for_pcs/hapmap.hg38 --make-bed --out pre_imputed_blacks_clop_noac_hapmap_merged
+```
+
+If failed, use .missnp to exclude bad snps
+```{}
+plink --bfile hapmap.hg38 --exclude /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/pre_imputed_blacks_clop_noac_hapmap_merged-merge.missnp --make-bed --out hapmap.hg38_excluded_snps
+
+plink --bfile /home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/missingness_hwe_steps/05filtered_HWE --exclude pre_imputed_blacks_clop_noac_hapmap_merged-merge.missnp --make-bed --out pre_imputed_blacks_clop_noac_excluded_snps
+```
+
+Merge the new files
+```{}
+plink --bfile pre_imputed_blacks_clop_noac_excluded_snps --bmerge /home/rhea/account_wflow/covariates/hapmap_pops_plinkfiles_for_pcs/hapmap.hg38_excluded_snps --make-bed --out pre_imputed_blacks_clop_noac_hapmap_excluded_snps_merged
+```
+
+Run PCA with merged plinkfiles:
+```{}
+/home/ashley/king --pca -b pre_imputed_blacks_clop_noac_hapmap_excluded_snps_merged.bed --prefix blacks_clop_noac_hapmap_merged_
+```
+
+### Create PC Plots
+```{}
+#Import necessary libraries
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+
+#Read in fam file and add column names
+fam<-fread("/home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/pre_imputed_blacks_clop_noac_hapmap_excluded_snps_merged.fam") %>% select (V1,V2)
+colnames(fam)<-c("FID", "IID")
+#add column with pop
+pop<-c(rep("CEU", 111), rep("AFA", 141), rep("ASN", 170), rep("YRI", 110))
+fam_with_pop<-add_column(fam, pop=pop, .before = "FID")
+
+#Read in pcs (king output)
+pcs <- fread("/home/rhea/account_wflow/vcfs/preimputation_plinkfiles/clop_noac/blacks_clop_noac_hapmap_merged_pc.txt")
+
+#Join fam and pcs to reorder pcs and add pop 
+pcdf <- left_join(fam_with_pop, pcs)
+
+#Create vector with eigen values (they appear in output process as king runs pca, no file produced)
+eval<-c(3569.71, 2389.00, 646.99, 590.33, 494.22, 488.86, 487.72, 486.80, 485.43, 485.22)
+
+#Calcuate proportion variance explained by each PC:
+eval<-round(eval/sum(eval),3)
+eval<-cbind.data.frame(eval,c(1,2,3,4,5,6,7,8,9,10))
+colnames(eval)<-c("percent_var", "PC")
+
+#Make PCA plots:
+pdf("/home/rhea/account_wflow/covariates/pca_plots/clop_noac_hapmap_pca_plots.pdf")
+
+#Scree Plot
+ggplot(data=eval, aes(x=PC, y=percent_var)) + geom_point() + geom_line() + scale_x_continuous(breaks = 1:10) + ggtitle("Proportion of variance explained")
+
+#PCA Plot 1 (PC1 vs PC2)
+ggplot() + geom_point(data=pcdf,aes(x=PC1,y=PC2,col=pop,shape=pop)) + theme_bw() + scale_colour_brewer(palette="Set1") + ggtitle("PC1 vs PC2")
+
+#PCA Plot 2 (PC1 vs PC3)
+ggplot() + geom_point(data=pcdf,aes(x=PC1,y=PC3,col=pop,shape=pop)) + theme_bw() + scale_colour_brewer(palette="Set1") + ggtitle("PC1 vs PC3")
+
+#PCA Plot 1 (PC2 vs PC3)
+ggplot() + geom_point(data=pcdf,aes(x=PC2,y=PC3,col=pop,shape=pop)) + theme_bw() + scale_colour_brewer(palette="Set1") + ggtitle("PC2 vs PC3")
+
+dev.off() 
+
+```
+
+### Make the Covariate and Phenotype files
+```{}
+#Import necessary libraries
+library(data.table)
+library(dplyr)
+library(tibble)
+
+#import pcs 
+clop_noac_pcs <- fread("/home/rhea/account_wflow/covariates/clop_noac/blacks_clop_noac_pc.txt")
+clop_noac_cov_pcs<-select(clop_noac_pcs, 1,2,7:16)
+
+#import pheno files for each drug:
+clop_noac_pheno<-fread("/home/rhea/account_wflow/phenos/clop_noac/clop_noac_CrCl_pheno_final.txt")
+
+#Clop/Noac covariates: 10 pcs, age, gender
+#join files by ids
+clop_noac_covs_pheno<-left_join(clop_noac_cov_pcs, clop_noac_pheno, by = c("FID" = "V1", "IID" = "V2"))
+#make pheno file
+clop_noac_pheno_no_ids<-select(clop_noac_covs_pheno, 20)
+#replace MD with NA in nano after outputting
+fwrite(clop_noac_pheno_no_ids, "/home/rhea/account_wflow/phenos/clop_noac/clop_noac_pheno_no_ids.txt", sep = "\t", col.names = F, quote = F)
+#make covariates file
+clop_noac_covs<-select(clop_noac_covs_pheno, 3:12,16)
+#remake gender column with F=1 and M=0:
+gender<-c()
+for (g in clop_noac_covs_pheno$Gender){
+  if (g == "F") {
+    gender<-c(gender, 1)
+  }
+  if (g == "M") {
+    gender<-c(gender, 0)
+  }
+}
+#add gender column to covs
+clop_noac_covs_all<-add_column(clop_noac_covs, gender = gender)
+#output file
+fwrite(clop_noac_covs_all, "/home/rhea/account_wflow/covariates/clop_noac/clop_noac_covariates.txt", sep = "\t", col.names = F, quote = F)
+
+```
+
+### Rank Normalize Phenotype file
+```{}
+#import necessary libraries
+library(data.table)
+
+#get source functions
+source("/home/rhea/account_wflow/rntransform.R")
+source("/home/rhea/account_wflow/ztransform.R")
+
+#read in pheno files
+clop_noac_pheno<-fread("/home/rhea/account_wflow/phenos/clop_noac/clop_noac_pheno_no_ids.txt", header = F)
+
+#rank-normalize phenos:
+clop_noac_pheno$V1<-rntransform(clop_noac_pheno$V1)
+
+#output rank-normalized phenos:
+fwrite(clop_noac_pheno, "/home/rhea/account_wflow/phenos/clop_noac/clop_noac_rn_pheno_no_ids.txt", col.names = F, sep = "\t", quote = F, na = NA)
+
+```
