@@ -246,43 +246,9 @@ for(model in model_list){
 
 
 ### Run Covariates
-Check `Covariates` on Home.
+Check `Covariates` on Home. This is where the covariates file, phenotype file, and kinship file will be generated.
 
-### Create new kinship files
-Because we are working with two drug groups, the kinship file needs to be recreated for GEMMA.
-
-```{}
-
-```
-
-```{}
-
-#import original kinship files
-clop_kinship <- fread("/home/rhea/account_wflow/covariates/clop/blacks_clop.cXX.txt")
-noac_kinship <- fread("/home/rhea/account_wflow/coviarates/noac/blacks_noac.cXX.txt")
-
-#select rows to keep
-clop_kinship_keep <- clop_kinship[c(1:15, 17:142), ]
-noac_kinship_keep <- noac_kinship[c(1:6, 8:234), ]
-
-#double check dimensions with `dim` function
-
-#output adjusted files
-fwrite(clop_kinship_keep, "/home/rhea/account_wflow/covariates/clop/blacks_clop_adj.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
-fwrite(noac_kinship_keep, "/home/rhea/account_wflow/covariates/noac/blacks_noac_adj.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
-
-#combine kinship files
-clop_kinship_adj <- fread("/home/rhea/account_wflow/covariates/clop/blacks_clop_adj.cXX.txt")
-noac_kinship_adj <- fread("/home/rhea/account_wflow/covariates/noac/blacks_noac_adj.cXX.txt")
-
-kinship_cmbnd <- bind_rows(clop_kinship_adj, noac_kinship_adj, .id = NULL)
-
-#output combined kinship file
-fwrite(kinship_cmbnd, "/home/rhea/account_wflow/covariates/clop_noac/blacks_clop_noac.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
-
-```
-
-### Run GEMMA - not done
+### Run GEMMA 
 
 ```{}
 
