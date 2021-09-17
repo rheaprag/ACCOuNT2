@@ -1,0 +1,71 @@
+
+## Introduction
+
+This code runs PrediXcan with the protein models from TOPMed to output a matrix whih lists every protein level and combination a person has. 
+
+## Run PrediXcan with all drug groups and protein models
+
+```{}
+declare -a drugs=("clop" "apix" "riva" "warf")
+declare -a model_pops=("AFA" "ALL" "CAU" "CHN" "HIS")
+
+for model_pop in ${model_pops[@]}
+  do
+  for drug in ${drugs[@]}
+    do
+    python3 /home/wheelerlab3/MetaXcan/software/Predict.py \
+    --model_db_path /home/ryan/TOPMed_Proteome/dbs_out/${model_pop}_PCAIR_baseline_models_PAV_filtered_rho0.1_zpval0.05.db \
+    --text_genotypes /home/rhea/account_wflow/dosages/blacks/${drug}/pred_dosages/${drug}_chr*.dosage.txt.gz \
+    --text_sample_ids /home/ashley/account/dosages/blacks/${drug}/samples_${drug}.txt \
+    --prediction_output /home/rhea/account_wflow/pwas_results/blacks/${drug}/predicted_levels/blacks_${drug}_PCAIR_PAV_filtered_${model_pop}_baseline_rho0.1_zpval0.05.txt
+  done
+done
+
+#NOAC:
+
+declare -a drugs=("noac")
+declare -a model_pops=("AFA" "ALL" "CAU" "CHN" "HIS")
+
+for model_pop in ${model_pops[@]}
+  do
+  for drug in ${drugs[@]}
+    do
+    python3 /home/wheelerlab3/MetaXcan/software/Predict.py \
+    --model_db_path /home/ryan/TOPMed_Proteome/dbs_out/${model_pop}_PCAIR_baseline_models_PAV_filtered_rho0.1_zpval0.05.db \
+    --text_genotypes /home/rhea/account_wflow/dosages/blacks/${drug}/pred_dosages/${drug}_chr*.dosage.txt.gz \
+    --text_sample_ids /home/ashley/account/dosages/blacks/${drug}/samples_${drug}.txt \
+    --prediction_output /home/rhea/account_wflow/pwas_results/blacks/${drug}/predicted_levels/blacks_${drug}_PCAIR_PAV_filtered_${model_pop}_baseline_rho0.1_zpval0.05.txt
+  done
+done
+```
+
+
+## Convert predicted expression from PrediXcan to GEMMA input
+
+This will convert the matrix outputted from PrediXcan to the input for GEMMA.
+
+Used R in command line to execute code.
+
+``` {}
+library(data.table)
+"%&%" = function(a,b) paste(a,b,sep="")
+model_list <- c("AFA", "CAU", "HIS", "CHN", "ALL")
+drug_list <- c("clop", "apix", "riva", "warf")
+
+for(model in model_list){
+  for(drug in drug_list){
+    pred_exp <- fread("/home/rhea/account_wflow/pwas_results/blacks/" %&% drug %&% "/predicted_levels/blacks_" %&% drug %&% "_PCAIR_PAV_filtered_" %&% model %&% "_baseline_rho0.1_zpval0.05.txt", header = F) #path to PrediXcan-produced _predicted_expression.txt
+    pred_exp$V1 <- NULL
+    pred_exp$V2 <- NULL
+    pred_exp <- transpose(pred_exp)
+    gene_list <- as.data.frame(pred_exp$V1)
+    colnames(gene_list) <- "V0"
+    pred_exp <- cbind(gene_list, pred_exp)
+    pred_exp$V0 <- NA
+    pred_exp$V1 <- NA
+    colnames(gene_list) <- "V"
+    pred_exp <- cbind(gene_list, pred_exp)
+    fwrite(pred_exp, "/home/rhea/account_wflow/pwas_results/blacks/" %&% drug %&% "/assoc_gemma_input/blacks_" %&% drug %&% "_PCAIR_PAV_filtered_" %&% model %&% "_baseline_rho0.1_zpval0.05_gemma.txt", na = "NA", quote = F, sep = "\t", col.names = F) #path to GEMMA input/pseudo-genotype
+  }
+}
+```
