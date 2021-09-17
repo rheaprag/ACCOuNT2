@@ -1,0 +1,307 @@
+
+## Introduction
+
+This analysis looks at creatinine clearance in the data. 
+
+Creatinine is a waste product produced in our body. Low creatinine levels indicate kidney damage while high levels indicate diminished kidney function.
+
+This analysis uses the Clopidogrel and NOAC drug groups. 
+
+### Extract Phenotype Data 
+
+The `csv` files with matched IDs were used for this.
+
+```{}
+#adapted from Ashley's code ACCOUNT/scripts/pheno/extract_important_pheno_data.R
+
+#import necessary libraries
+library(data.table)
+library(dplyr)
+
+#import csv files for clop & noac
+clop<-fread("/home/rhea/account_wflow/phenos/clop/account_clopidogrel_processed_matched_IDs_all.csv")
+noac<-fread("/home/rhea/account_wflow/phenos/noac/account_noac_processed_matched_IDs_all.csv")
+
+#save ids and pheno columns only, remove unneeded columns so files are easier to work with
+clop_small<-clop[, c(1:9,206)]
+noac_small<-noac[, c(1:9,79)]
+
+#output files
+fwrite(clop_small, "clop_CrCl_with_ids.txt", sep = "\t", quote = F, na = NA)
+fwrite(noac_small, "noac_CrCl_with_ids.txt", sep = "\t", quote = F, na = NA)
+
+```
+
+### Merge Samples File with Phenotype Data 
+
+```{}
+#import necessary libraries
+library(data.table)
+library(dplyr)
+
+#import samples & pheno txt files for clop 
+clop_samples<-fread("/home/ashley/account/dosages/blacks/clop/samples_clop.txt", header = FALSE)
+clop_phenos<-fread("/home/rhea/account_wflow/phenos/clop/clop_CrCl_with_ids.txt")
+
+#merge two files
+clop_cmbnd<-left_join(clop_samples, clop_phenos)
+
+#output file
+fwrite(clop_cmbnd, "clop_combnd_pheno_ids.txt", sep = "\t", quote = F, na = NA)
+
+```
+
+Repeat this step to create combined phenotype file for NOAC.
+
+### Calculate Creatinine Clearance for Clopidogril Data
+
+```{}
+#crcl calculation
+#Est. Creatinine Clearance = [[140 - age(yr)]*weight(kg)]/[72*serum Cr(mg/dL)]
+#multiply by 0.85 for women
+
+library(data.table)
+library(dplyr)
+
+#import pheno file in for clop, has missing data values
+clop<-fread("/home/rhea/account_wflow/phenos/clop/clop_combnd_pheno_ids.txt")
+
+str(clop) #see structure of data.frame
+#Note Height and Creatinine level are characters, need to convert to the numeric type
+
+clop_age<-clop$`Age at enrollment (with over 89 binning)`
+clop_weight<-as.numeric(clop$`Weight (kg)`) #as.numeric() converts MD's to NA, I'm assuming MD="missing data"?
+clop_sCr<-as.numeric(clop$`Creatinine level (mg/dL)`) #as.numeric() converts characters to numbers and MD's to NA, so we can do math
+
+crcl <- (140 - clop_age)*clop_weight / (72*clop_sCr)
+
+#use mutate() to add crcl to clop data.frame and adjust if female with ifelse()
+clop <- mutate(clop, CrCl = ifelse(Gender=='M',crcl,0.85*crcl))
+
+fwrite(clop, "clop_CrCl_pheno.txt", sep="\t", na="NA", quote=FALSE)
+```
+
+### Finishing Data File
+
+Now, a row needs to be removed from both the clop and noac files as the person switched drugs:
+```{}
+library(data.table)
+library(dplyr)
+
+clop<-fread("/home/rhea/account_wflow/phenos/clop/clop_CrCl_pheno.txt")
+clop_new<-clop[-c(16),]
+fwrite(clop_new, "clop_CrCl_pheno_final.txt", sep = "\t", quote = F, na = NA)
+
+noac<-fread("/home/rhea/account_wflow/phenos/noac/noac_combnd_pheno_ids.txt")
+noac_new<-noac[-c(6),] #remove duplicated data & missing data
+
+fwrite(noac_new, "noac_CrCl_pheno_final.txt", sep = "\t", quote = F, na = NA)
+```
+
+### Histogram
+
+The original histogram created showed that the data was skewed to the right. 
+
+In order to fix this, I first applied log transformation to the phenotype files:
+```{}
+library(ggplot2)
+library(dplyr)
+
+#clop
+clop<-fread("/home/rhea/account_wflow/phenos/clop/clop_CrCl_pheno_final.txt")
+Creatinine_clop <- clop$CrCl
+Creatinine_c_log <- log(Creatinine_clop)
+clop_hist <- hist(Creatinine_c_log,
+main="Creatinine Clearance of Clopidogril",
+col="darkmagenta")
+
+#noac 
+noac<-fread("/home/rhea/account_wflow/phenos/noac/noac_CrCl_pheno_final.txt")
+colnames(noac)[10] <- "CrCl"
+Creatinine_noac <- noac$CrCl
+Creatinine_noac_num <- as.numeric(Creatinine_noac)
+Creatinine_noac_log <- log(Creatinine_noac_num)
+noac_hist <- hist(Creatinine_noac_log,
+main="Creatinine Clearance of NOAC drugs",
+col="gold")
+
+```
+
+However, the log transformed data was now skewed to the left. So I applied rank normalization to the data instead.
+
+```{}
+library(ggplot2)
+library(dplyr)
+
+#rank normalize files
+source("/home/rhea/account_wflow/rntransform.R")
+source("/home/rhea/account_wflow/ztransform.R")
+
+clop<-fread("/home/rhea/account_wflow/phenos/clop/clop_CrCl_pheno_final.txt")
+Creatinine_clop <- rntransform(clop$CrCl)
+clop_hist <- hist(Creatinine_clop,
+main="Creatinine Clearance of Clopidogril",
+col="darkmagenta")
+
+noac<-fread("/home/rhea/account_wflow/phenos/noac/noac_CrCl_pheno_final.txt")
+colnames(noac)[10] <- "CrCl"
+Creatinine_noac <- noac$CrCl
+Creatinine_noac_num <- as.numeric(Creatinine_noac)
+Creatinine_noac_rn <- rntransform(Creatinine_noac_num)
+noac_hist <- hist(Creatinine_noac_rn,
+main="Creatinine Clearance of NOAC drugs",
+col="gold")
+
+```
+
+These histograms showed a normal distribution. The phenotype data used for the remainder of the calculations will be rank-normalized.
+
+Histograms are all saved under `/home/rhea/account_wflow/phenos/{drug}`.
+
+### Merge samples file - ?
+
+```{}
+
+clop_ids <- fread("/home/rhea/account_wflow/vcfs/blacks_imputed/clop/clop_ids_CrCl.txt")
+noac_ids <- fread("/home/rhea/account_wflow/vcfs/blacks_imputed/noac/noac_ids_CrCl.txt")
+
+clop_noac_ids <- union_all(clop_ids, noac_ids)
+fwrite(clop_noac_ids, "clop_noac_ids.txt")
+
+```
+
+using merged samples file...
+
+### Create Dosage files
+
+```{}
+#split vcf by pulling out clop & noac data using combined ID file
+for chr in {1..22};
+do vcftools --gzvcf /home/ashley/account/vcfs/blacks_imputed/all/chr${chr}_maf01_r28.vcf.gz --keep /home/rhea/account_wflow/vcfs/blacks_imputed/clop_noac/clop_noac_CrCl_ids.txt --recode --recode-INFO-all --out clop_noac_chr${chr};
+done
+
+#gzip new vcf files
+gzip clop_noac_chr*.recode.vcf
+
+# Use vcf_to_dosage.py to output dosage txt files
+for chr in {1..22};
+do python /home/rhea/account_wflow/vcfs/vcf_to_dosage.py -i /home/rhea/account_wflow/vcfs/blacks_imputed/clop_noac/ -c ${chr} -d clop_noac;
+done
+
+gzip clop_noacchr*.dosage.txt
+
+```
+
+create merged samples_clop_noac.txt file
+
+### Run PWAS
+
+```{}
+
+#Run PrediXcan with drug groups and protein models:
+
+declare -a drugs=("clop_noac")
+declare -a model_pops=("AFA" "ALL" "CAU" "CHN" "HIS")
+
+for model_pop in ${model_pops[@]}
+  do
+  for drug in ${drugs[@]}
+    do
+    python3 /home/wheelerlab3/MetaXcan/software/Predict.py \
+    --model_db_path /home/ryan/TOPMed_Proteome/dbs_out/${model_pop}_PCAIR_baseline_models_PAV_filtered_rho0.1_zpval0.05.db \
+    --text_genotypes /home/rhea/account_wflow/dosages/blacks/clop_noac/pred_dosages/clop_noacchr*.dosage.txt.gz \
+    --text_sample_ids /home/rhea/account_wflow/dosages/blacks/clop_noac/samples_clop_noac.txt \
+    --prediction_output /home/rhea/account_wflow/pwas_results/blacks/${drug}/predicted_levels/blacks_${drug}_PCAIR_PAV_filtered_${model_pop}_baseline_rho0.1_zpval0.05.txt
+  done
+done
+
+```
+
+### Convert PrediXcan Output to GEMMA input
+
+```{}
+
+library(data.table)
+"%&%" = function(a,b) paste(a,b,sep="")
+model_list <- c("AFA", "HIS", "CHN", "ALL")
+drug_list <- c("clop_noac")
+
+for(model in model_list){
+  for(drug in drug_list){
+    pred_exp <- fread("/home/rhea/account_wflow/pwas_results/blacks/" %&% drug %&% "/predicted_levels/blacks_" %&% drug %&% "_PCAIR_PAV_filtered_" %&% model %&% "_baseline_rho0.1_zpval0.05.txt", header = F) #path to PrediXcan-produced _predicted_expression.txt
+    pred_exp$V1 <- NULL
+    pred_exp$V2 <- NULL
+    pred_exp <- transpose(pred_exp)
+    gene_list <- as.data.frame(pred_exp$V1)
+    colnames(gene_list) <- "V0"
+    pred_exp <- cbind(gene_list, pred_exp)
+    pred_exp$V0 <- NA
+    pred_exp$V1 <- NA
+    colnames(gene_list) <- "V"
+    pred_exp <- cbind(gene_list, pred_exp)
+    fwrite(pred_exp, "/home/rhea/account_wflow/pwas_results/blacks/" %&% drug %&% "/assoc_gemma_input/blacks_" %&% drug %&% "_PCAIR_PAV_filtered_" %&% model %&% "_baseline_rho0.1_zpval0.05_gemma.txt", na = "NA", quote = F, sep = "\t", col.names = F) #path to GEMMA input/pseudo-genotype
+  }
+}
+```
+
+
+### Run Covariates
+Check `Covariates` on Home.
+
+### Create new kinship files
+Because we are working with two drug groups, the kinship file needs to be recreated for GEMMA.
+
+```{}
+
+```
+
+```{}
+
+#import original kinship files
+clop_kinship <- fread("/home/rhea/account_wflow/covariates/clop/blacks_clop.cXX.txt")
+noac_kinship <- fread("/home/rhea/account_wflow/coviarates/noac/blacks_noac.cXX.txt")
+
+#select rows to keep
+clop_kinship_keep <- clop_kinship[c(1:15, 17:142), ]
+noac_kinship_keep <- noac_kinship[c(1:6, 8:234), ]
+
+#double check dimensions with `dim` function
+
+#output adjusted files
+fwrite(clop_kinship_keep, "/home/rhea/account_wflow/covariates/clop/blacks_clop_adj.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
+fwrite(noac_kinship_keep, "/home/rhea/account_wflow/covariates/noac/blacks_noac_adj.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
+
+#combine kinship files
+clop_kinship_adj <- fread("/home/rhea/account_wflow/covariates/clop/blacks_clop_adj.cXX.txt")
+noac_kinship_adj <- fread("/home/rhea/account_wflow/covariates/noac/blacks_noac_adj.cXX.txt")
+
+kinship_cmbnd <- bind_rows(clop_kinship_adj, noac_kinship_adj, .id = NULL)
+
+#output combined kinship file
+fwrite(kinship_cmbnd, "/home/rhea/account_wflow/covariates/clop_noac/blacks_clop_noac.cXX.txt", col.names = F, sep = "\t", quote = F, na = " ")
+
+```
+
+### Run GEMMA - not done
+
+```{}
+
+declare -a drugs=("clop_noac")
+declare -a models=("ALL" "AFA" "CHN" "HIS")
+
+#Use loop to run PrediXcan step two through GEMMA (accounts for relatedness)
+for drug in ${drugs[@]}
+  do
+  for model in ${models[@]}
+    do
+    /usr/local/bin/gemma -g /home/rhea/account_wflow/pwas_results/blacks/clop_noac/assoc_gemma_input/blacks_clop_noac_PCAIR_PAV_filtered_${model}_baseline_rho0.1_zpval0.05_gemma.txt \
+    -notsnp \
+    -p /home/rhea/account_wflow/phenos/clop_noac/clop_noac_pheno_no_ids.txt \
+    -k /home/rhea/account_wflow/covariates/clop_noac/blacks_clop_noac.cXX.txt \
+    -c /home/rhea/account_wflow/covariates/clop_noac/clop_noac_covariates.txt \
+    -lmm 4 \
+    -o ${drug}_PCAIR_PAV_filtered_${model}_baseline_rho0.1_zpval0.05
+  done
+done
+
+```
